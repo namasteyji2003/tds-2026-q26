@@ -58,8 +58,15 @@ def cosine_similarity(a, b):
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 def summarize(text):
-    time.sleep(1.5)
+    # Simulate expensive LLM call
+    start = time.time()
+
+    # Artificial heavy computation
+    for _ in range(5_000_000):
+        pass
+
     return f"Summary: {text[:150]}..."
+
 
 def remove_expired():
     now = time.time()
@@ -178,4 +185,5 @@ def get_analytics():
             "TTL expiration"
         ]
     }
+
 
