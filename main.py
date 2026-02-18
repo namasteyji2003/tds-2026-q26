@@ -99,7 +99,7 @@ def process_query(payload: QueryRequest):
     if key in cache:
         analytics["cacheHits"] += 1
         cache.move_to_end(key)
-        latency = int((time.time() - start_time) * 1000)
+        latency = max(1, int((time.time() - start_time) * 1000))
 
         return {
             "answer": cache[key]["response"],
@@ -116,7 +116,7 @@ def process_query(payload: QueryRequest):
         if similarity > SEMANTIC_THRESHOLD:
             analytics["cacheHits"] += 1
             cache.move_to_end(cached_key)
-            latency = int((time.time() - start_time) * 1000)
+            latency = max(1, int((time.time() - start_time) * 1000))
 
             return {
                 "answer": value["response"],
@@ -137,7 +137,7 @@ def process_query(payload: QueryRequest):
 
     evict_if_needed()
 
-    latency = int((time.time() - start_time) * 1000)
+    latency = max(1, int((time.time() - start_time) * 1000))
 
     return {
         "answer": response,
@@ -178,3 +178,4 @@ def get_analytics():
             "TTL expiration"
         ]
     }
+
