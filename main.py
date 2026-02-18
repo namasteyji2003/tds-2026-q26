@@ -4,20 +4,30 @@ import numpy as np
 from fastapi import FastAPI
 from pydantic import BaseModel
 from collections import OrderedDict
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+# ✅ Enable CORS (VERY IMPORTANT)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------------------------
 # Configuration
 # ---------------------------
 MODEL_COST_PER_MILLION = 1.0
 AVG_TOKENS_PER_REQUEST = 3000
-TTL_SECONDS = 86400  # 24 hours
+TTL_SECONDS = 86400
 MAX_CACHE_SIZE = 1500
 SEMANTIC_THRESHOLD = 0.95
 
 # ---------------------------
-# In-Memory Cache (LRU)
+# Cache & Analytics
 # ---------------------------
 cache = OrderedDict()
 
@@ -35,22 +45,20 @@ class QueryRequest(BaseModel):
     application: str
 
 # ---------------------------
-# Helper Functions
+# Helpers
 # ---------------------------
-def md5_hash(text: str):
+def md5_hash(text):
     return hashlib.md5(text.encode()).hexdigest()
 
-def get_embedding(text: str):
-    # Lightweight deterministic embedding (no ML model needed)
+def get_embedding(text):
     np.random.seed(abs(hash(text)) % (10**6))
     return np.random.rand(384)
 
 def cosine_similarity(a, b):
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
-def summarize(text: str):
-    # Simulated LLM call
-    time.sleep(1.5)  # simulate latency
+def summarize(text):
+    time.sleep(1.5)
     return f"Summary: {text[:150]}..."
 
 def remove_expired():
@@ -64,10 +72,17 @@ def remove_expired():
 
 def evict_if_needed():
     while len(cache) > MAX_CACHE_SIZE:
-        cache.popitem(last=False)  # Remove LRU
+        cache.popitem(last=False)
 
 # ---------------------------
-# Main Endpoint
+# Health Check (IMPORTANT)
+# ---------------------------
+@app.get("/")
+def health_check():
+    return {"status": "AI Caching System Running"}
+
+# ---------------------------
+# Main Query Endpoint
 # ---------------------------
 @app.post("/")
 def process_query(payload: QueryRequest):
@@ -78,10 +93,9 @@ def process_query(payload: QueryRequest):
     query = payload.query
     key = md5_hash(query)
 
-    # Remove expired cache entries
     remove_expired()
 
-    # 1️⃣ Exact Match Cache
+    # Exact match
     if key in cache:
         analytics["cacheHits"] += 1
         cache.move_to_end(key)
@@ -94,7 +108,7 @@ def process_query(payload: QueryRequest):
             "cacheKey": key
         }
 
-    # 2️⃣ Semantic Cache
+    # Semantic match
     query_embedding = get_embedding(query)
 
     for cached_key, value in cache.items():
@@ -111,9 +125,8 @@ def process_query(payload: QueryRequest):
                 "cacheKey": cached_key
             }
 
-    # 3️⃣ Cache Miss → Simulated LLM Call
+    # Cache miss
     analytics["cacheMisses"] += 1
-
     response = summarize(query)
 
     cache[key] = {
@@ -134,7 +147,7 @@ def process_query(payload: QueryRequest):
     }
 
 # ---------------------------
-# Analytics Endpoint
+# Analytics Endpoint (REQUIRED)
 # ---------------------------
 @app.get("/analytics")
 def get_analytics():
