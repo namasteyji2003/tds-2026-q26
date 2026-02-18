@@ -4,12 +4,11 @@ import numpy as np
 from fastapi import FastAPI
 from pydantic import BaseModel
 from collections import OrderedDict
-from sentence_transformers import SentenceTransformer
 
 app = FastAPI()
 
 # ---------------------------
-# Config
+# Configuration
 # ---------------------------
 MODEL_COST_PER_MILLION = 1.0
 AVG_TOKENS_PER_REQUEST = 3000
@@ -18,54 +17,54 @@ MAX_CACHE_SIZE = 1500
 SEMANTIC_THRESHOLD = 0.95
 
 # ---------------------------
-# Embedding Model (local)
+# In-Memory Cache (LRU)
 # ---------------------------
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+cache = OrderedDict()
 
-# ---------------------------
-# Cache Store
-# ---------------------------
-cache = OrderedDict()  # LRU
 analytics = {
     "totalRequests": 0,
     "cacheHits": 0,
     "cacheMisses": 0,
-    "cachedTokens": 0,
 }
 
 # ---------------------------
-# Models
+# Request Model
 # ---------------------------
 class QueryRequest(BaseModel):
     query: str
     application: str
 
 # ---------------------------
-# Helpers
+# Helper Functions
 # ---------------------------
-def md5_hash(text):
+def md5_hash(text: str):
     return hashlib.md5(text.encode()).hexdigest()
 
-def cosine_similarity(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+def get_embedding(text: str):
+    # Lightweight deterministic embedding (no ML model needed)
+    np.random.seed(abs(hash(text)) % (10**6))
+    return np.random.rand(384)
 
-def summarize(text):
-    # Simulated LLM summarizer (replace with real API if needed)
+def cosine_similarity(a, b):
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+def summarize(text: str):
+    # Simulated LLM call
     time.sleep(1.5)  # simulate latency
     return f"Summary: {text[:150]}..."
 
-def evict_if_needed():
-    while len(cache) > MAX_CACHE_SIZE:
-        cache.popitem(last=False)  # remove LRU
-
 def remove_expired():
     now = time.time()
-    expired_keys = [
-        key for key, val in cache.items()
-        if now - val["timestamp"] > TTL_SECONDS
+    expired = [
+        key for key, value in cache.items()
+        if now - value["timestamp"] > TTL_SECONDS
     ]
-    for key in expired_keys:
+    for key in expired:
         del cache[key]
+
+def evict_if_needed():
+    while len(cache) > MAX_CACHE_SIZE:
+        cache.popitem(last=False)  # Remove LRU
 
 # ---------------------------
 # Main Endpoint
@@ -73,19 +72,20 @@ def remove_expired():
 @app.post("/")
 def process_query(payload: QueryRequest):
 
-    start = time.time()
+    start_time = time.time()
     analytics["totalRequests"] += 1
 
     query = payload.query
     key = md5_hash(query)
 
+    # Remove expired cache entries
     remove_expired()
 
     # 1️⃣ Exact Match Cache
     if key in cache:
         analytics["cacheHits"] += 1
         cache.move_to_end(key)
-        latency = int((time.time() - start) * 1000)
+        latency = int((time.time() - start_time) * 1000)
 
         return {
             "answer": cache[key]["response"],
@@ -95,14 +95,14 @@ def process_query(payload: QueryRequest):
         }
 
     # 2️⃣ Semantic Cache
-    query_embedding = embed_model.encode(query)
+    query_embedding = get_embedding(query)
 
     for cached_key, value in cache.items():
         similarity = cosine_similarity(query_embedding, value["embedding"])
         if similarity > SEMANTIC_THRESHOLD:
             analytics["cacheHits"] += 1
             cache.move_to_end(cached_key)
-            latency = int((time.time() - start) * 1000)
+            latency = int((time.time() - start_time) * 1000)
 
             return {
                 "answer": value["response"],
@@ -111,7 +111,7 @@ def process_query(payload: QueryRequest):
                 "cacheKey": cached_key
             }
 
-    # 3️⃣ Cache Miss → Call LLM
+    # 3️⃣ Cache Miss → Simulated LLM Call
     analytics["cacheMisses"] += 1
 
     response = summarize(query)
@@ -124,7 +124,7 @@ def process_query(payload: QueryRequest):
 
     evict_if_needed()
 
-    latency = int((time.time() - start) * 1000)
+    latency = int((time.time() - start_time) * 1000)
 
     return {
         "answer": response,
